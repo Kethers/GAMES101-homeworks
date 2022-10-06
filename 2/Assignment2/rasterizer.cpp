@@ -85,12 +85,12 @@ void rst::rasterizer::draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf
             mvp * to_vec4(buf[i[0]], 1.0f),
             mvp * to_vec4(buf[i[1]], 1.0f),
             mvp * to_vec4(buf[i[2]], 1.0f)};
-        //Homogeneous division
+        // Homogeneous division
         for (auto &vec : v)
         {
             vec /= vec.w();
         }
-        //Viewport transformation
+        // Viewport transformation
         for (auto &vert : v)
         {
             vert.x() = 0.5 * width * (vert.x() + 1.0);
@@ -117,7 +117,7 @@ void rst::rasterizer::draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf
     }
 }
 
-//Screen space rasterization
+// Screen space rasterization
 void rst::rasterizer::rasterize_triangle(const Triangle &t)
 {
     auto v = t.toVector4();
@@ -153,27 +153,28 @@ void rst::rasterizer::rasterize_triangle(const Triangle &t)
             if (MSAA)
             {
                 int count = 0; // tear apart 1 pixel into 4 subpixels and record how many subpixels are in the triangle
-                float min_depth = std::numeric_limits<float>::infinity();
+                int eid = get_index(x, y) * 4;
                 for (int i = 0; i < 4; ++i)
                 {
                     float tmpx = x + pos[i][0], tmpy = y + pos[i][1];
                     if (insideTriangle(tmpx, tmpy, t.v))
                     {
                         float z_interpolated = depth_interpolate(tmpx, tmpy, t);
-                        min_depth = std::min(min_depth, z_interpolated);
-                        ++count;
+                        if (z_interpolated < super_depth_buf[eid + i])
+                        {
+                            super_depth_buf[eid + i] = z_interpolated;
+                            super_frame_buf[eid + i] = t.getColor();
+                            ++count; // record how many subpixels pass the depth test
+                        }
                     }
                 }
                 if (count != 0)
                 {
                     int depth_buf_index = get_index(x, y);
-                    if (min_depth < depth_buf[depth_buf_index])
-                    {
-                        // update the Z-buffer
-                        depth_buf[depth_buf_index] = min_depth;
-                        // convolute/average the color
-                        set_pixel(Vector3f(x, y, 1.f), t.getColor() * count / 4);
-                    }
+                    Vector3f point{(float)x, (float)y, 0.0f};
+                    Vector3f color{(super_frame_buf[eid] + super_frame_buf[eid + 1] + super_frame_buf[eid + 2] + super_frame_buf[eid + 3]) / 4};
+                    // convolute/average the color
+                    set_pixel(point, color);
                 }
             }
             else
@@ -218,10 +219,12 @@ void rst::rasterizer::clear(rst::Buffers buff)
     if ((buff & rst::Buffers::Color) == rst::Buffers::Color)
     {
         std::fill(frame_buf.begin(), frame_buf.end(), Eigen::Vector3f{0, 0, 0});
+        std::fill(super_frame_buf.begin(), super_frame_buf.end(), Eigen::Vector3f{0, 0, 0});
     }
     if ((buff & rst::Buffers::Depth) == rst::Buffers::Depth)
     {
         std::fill(depth_buf.begin(), depth_buf.end(), std::numeric_limits<float>::infinity());
+        std::fill(super_depth_buf.begin(), super_depth_buf.end(), std::numeric_limits<float>::infinity());
     }
 }
 
@@ -229,6 +232,8 @@ rst::rasterizer::rasterizer(int w, int h) : width(w), height(h)
 {
     frame_buf.resize(w * h);
     depth_buf.resize(w * h);
+    super_frame_buf.resize(4 * w * h);
+    super_depth_buf.resize(4 * w * h);
 }
 
 int rst::rasterizer::get_index(int x, int y)
@@ -238,7 +243,7 @@ int rst::rasterizer::get_index(int x, int y)
 
 void rst::rasterizer::set_pixel(const Eigen::Vector3f &point, const Eigen::Vector3f &color)
 {
-    //old index: auto ind = point.y() + point.x() * width;
+    // old index: auto ind = point.y() + point.x() * width;
     auto ind = (height - 1 - point.y()) * width + point.x();
     frame_buf[ind] = color;
 }

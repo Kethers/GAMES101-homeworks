@@ -159,11 +159,54 @@ if (count != 0)
 
 
 
-## 用MSAA采样后的结果图
+## 用MSAA采样后的结果图（有黑边）
 
-![result MSAA 4X](./asset/result MSAA 4X.png)
+![result MSAA 4X-1](./asset/result MSAA 4X-1.png)
 
-相比于前面的结果图，可以很明显看到蓝色三角形上面的边和下面的边的锯齿消失了（或者说锯齿变得模糊了）。
+相比于前面的结果图，可以很明显看到蓝色三角形上面的边和下面的边的锯齿消失了（或者说锯齿变得模糊了）。但根据作业pdf可知，三角形之间有黑边其实是不正确的结果，原因是在对三角形边缘采样时，实际上采样的是三角形颜色+背景色，背景为黑色，所以有黑边。
+
+
+
+## 修正黑边
+
+定义4倍大小的frame_buf即super_frame_buf，以及4倍大小的depth_buf即super_depth_buf，并在rasterizer::clear和rasterizer::rasterizer这2个函数中添加对2个新buf的处理。
+
+核心逻辑如下：
+
+```cpp
+int count = 0; // tear apart 1 pixel into 4 subpixels and record how many subpixels are in the triangle
+int eid = get_index(x, y) * 4;
+for (int i = 0; i < 4; ++i)
+{
+    float tmpx = x + pos[i][0], tmpy = y + pos[i][1];
+    if (insideTriangle(tmpx, tmpy, t.v))
+    {
+        float z_interpolated = depth_interpolate(tmpx, tmpy, t);
+        if (z_interpolated < super_depth_buf[eid + i])
+        {
+            super_depth_buf[eid + i] = z_interpolated;
+            super_frame_buf[eid + i] = t.getColor();
+            ++count; // record how many subpixels pass the depth test
+        }
+    }
+}
+if (count != 0)
+{
+    int depth_buf_index = get_index(x, y);
+    Vector3f point{(float)x, (float)y, 0.0f};
+    Vector3f color{(super_frame_buf[eid] + super_frame_buf[eid + 1] + super_frame_buf[eid + 2] + super_frame_buf[eid + 3]) / 4};
+    // convolute/average the color
+    set_pixel(point, color);
+}
+```
+
+
+
+## 用MSAA采样后的结果图（无黑边）
+
+![result MSAA 4X-2](./asset/result MSAA 4X-2.png)
+
+
 
 ## Cost of MSAA
 
@@ -186,5 +229,7 @@ top = -zNear * tanf(fov_radian / 2);
 
 即可使显示正常。
 
-参考链接：http://games-cn.org/forums/topic/zuoye2chuxianshangxiazuoyoudiandaodewentichengyinshishenmeyijiyingdangruhejiejue/
+参考链接：[作业2出现上下左右颠倒的问题成因是什么以及应当如何解决 – 计算机图形学与混合现实在线平台 (games-cn.org)](http://games-cn.org/forums/topic/zuoye2chuxianshangxiazuoyoudiandaodewentichengyinshishenmeyijiyingdangruhejiejue/)
+
+[GAMES101作业2及课程总结（重点解决黑边问题）_我是小菜狗的博客-CSDN博客_games101作业2](https://blog.csdn.net/Xuuuuuuuuuuu/article/details/124172397)
 
